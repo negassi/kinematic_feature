@@ -1,0 +1,475 @@
+---
+title: 'STAT602 Final Project '
+author: "Negassi Tesfay"
+date: "4/25/2020"
+output:
+  rmarkdown::github_document
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,comment = NA,warning = F,message = F)
+```
+
+```{r}
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(MASS)
+library(class)
+library(knitr)
+library(gridExtra)
+
+```
+
+
+```{r}
+setwd("C:\\Users\\negas\\OneDrive\\Desktop\\stat602_final")
+trn.dat<-read.csv("labeled.csv", stringsAsFactors =T)[, -1]
+
+```
+
+
+# Kinematic Features Final Project (STAT 602 2020)
+
+The goal of this project to predict the following thee charactersics based the kinematic features of hand written text:  
+
+-What phrase was written.  
+
+-Was Cursive or Print used.  
+
+-Who was the writer of the sample. 
+
+
+## Data Collection:
+
+-40 Writers wrote 6 phrases
+
+-Each phrase were written in Cursive and Print
+
+-This process was repeated 3 times.
+
+A total of 40 x 6 x 2 x 3 = 1440 lines were collected.
+
+
+## Data Processing:
+
+-MoVAlyzeR system were used to process kinematic features of the text.
+
+Each line of phrase was broken into segments from 8 to 75 segments. 
+
+```{r}
+# this code is to see the maximum and minimun segement on dataset
+maxs <-trn.dat %>%  group_by(Group,Subject,Trial,Condition) %>% tally() %>% top_n(1)
+mins <-trn.dat %>%  group_by(Group,Subject,Trial,Condition) %>% tally() %>% top_n(-1)
+cat("Maximum number of  segments=",max(maxs[,5]))
+cat(",\tMinimum number of  segments=",min(mins[,5]))
+
+```
+
+## Data Description: 
+
+
+```{r}
+# this code immitates the str() function but as data.frame.
+data.frame(variable = names(trn.dat),
+           class = sapply(trn.dat, typeof),
+           first_values = sapply(trn.dat, function(x) paste0(head(x),  collapse = ", ")),
+           row.names = NULL) %>% 
+  kable()
+
+cat(nrow(trn.dat)," Rows and ", ncol(trn.dat)," Cols")
+```
+
+\newpage
+
+## Summary of the data
+
+*Min, Max, Mean,and Median were used as summary for printig convenience.*
+
+
+```{r}
+#This code imitates the summary() function.
+xdat <- trn.dat[,6:30]
+
+trn_summary <- xdat %>%
+  summarise_each(funs(min = min, 
+                      median = median, 
+                      max = max,
+                      mean = mean))
+                
+
+reshape_summary <- trn_summary %>% gather(stat, val) %>%
+  separate(stat, into = c("var", "stat"), sep = "_") %>%
+  spread(stat, val)
+
+kable(reshape_summary)
+```
+
+
+From the summary, we can see that two of the predctors are constant(all zeros). They need to be removed. 
+
+
+```{r}
+# remove constant varaibles.
+trn.dat <- trn.dat[ , -which(names(trn.dat) %in% c("RelativeDurationofPrimary","RelativeSizeofPrimary"))]
+```
+
+\newpage
+
+## Explore Data
+
+Box plot for the kinematic fetures based on Group. Some the variable made clear separation.The same thing can be done for Condition and Subject variables. (Change the varaible G at the beginign of the below chunk)
+
+
+```{r}
+G<-trn.dat$Group
+#length(colNames)
+colNames <- names(trn.dat)[7:30]
+#cbind(names(trn.dat))
+# Group
+plt <-list()
+for(i in colNames){
+  plt[[i]] <- ggplot(trn.dat, aes_string(x=G, y = i),title(main = i)) +
+    geom_boxplot() +theme_bw()+ xlab("Group") 
+  
+}
+
+```
+
+
+```{r}
+grid.arrange(plt[[1]], plt[[2]],plt[[3]],plt[[4]],plt[[5]],plt[[6]],plt[[7]],plt[[8]],ncol=4)
+```
+
+
+```{r}
+grid.arrange(plt[[9]], plt[[10]],plt[[11]],plt[[12]],plt[[13]],plt[[14]],plt[[15]],plt[[16]],ncol=4)
+```
+
+
+
+```{r}
+grid.arrange(plt[[17]], plt[[18]],plt[[19]],plt[[20]],plt[[21]],plt[[22]],ncol=4) 
+
+```
+
+\newpage
+
+# Prepare data for modeling
+
+-Average the kinematic features per line.(Take a mean of all the segment-features in line). And also separate the Class variables and Feature varaibles. And we will set aside the third trial for testing purpose
+
+```{r}
+# create a variable indicator of the columns(group, condition, subject and trial)
+trn_dat_idx_var <- mutate(trn.dat,index.var=apply(trn.dat[, 1:4], 1, paste, collapse = ":"))
+# remove the collapsed columns and the segment
+trn_dat_means <- trn_dat_idx_var[,-c(1:5)]
+# Aggregate into means by groupping by the indicator variable
+trn_dat_means <- trn_dat_means %>% group_by(index.var) %>% summarise_all(funs(mean)) 
+#Expand the indicator variable
+dt_mean_expnd <- trn_dat_means %>% separate(index.var,c("Group","Subject","Condition","Trial"),sep = ":")
+# The predictors dataframe
+trn_dat_means <- trn_dat_means[,-1]
+# Create a joint of the group, condition,and subject variable
+joint_idx <- apply(dt_mean_expnd[, 1:3], 1, paste, collapse = ":")
+# create the response varaible dataframe.
+class_cols <- (cbind(joint_idx,dt_mean_expnd[,1:4]))
+
+
+
+#kable(head(class_cols,10), caption = "Classes Data, first 10 rows")
+#kable(head(trn_dat_means[,1:6],10),caption = "Feauture Data,first 10 rows, and 6 colmns")
+```
+
+
+
+# Principal component Analysis:
+
+Principal component anlysis was used to reduce the dimension of the features and remove possible correlations betweeen predictors. and about more than 92% of variablity was captured by reducing to 10 components.
+
+
+```{r}
+#apply pca to predictor variabls
+pca_mod <- princomp(trn_dat_means,cor = T)
+#Calculate Variance proportion
+v <-pca_mod$sdev ^2
+prp_var <-v/sum(v)
+# Apppy cummulative sum
+cum_Var <-cumsum(prp_var)
+# Display the first 11
+kable(t(cum_Var[1:10]), caption = "The first 11 components captured about 92% of variance")
+```
+
+
+
+```{r}
+par(mfrow=c(1,2),mar = c(3,3,3,1), pty = "m")
+plot(pca_mod,main = "Principal Component")
+plot(prp_var, xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",main = "Screeplot of Principal Component",
+             type = "b")
+
+```
+
+The components can be seen graphically 
+
+\newpage
+
+## Explore our data afer transformation:
+
+A matrix of scatterplots between each pair of predictors after transformation, random sample 0f 70% was use to improve over plotting.
+
+```{r,fig.height=12,fig.width=12}
+# train and test datasets. this will be used in the intire project when needed
+pca_scores <- pca_mod$scores[,1:10]
+
+set.seed(602)
+n <-nrow(pca_scores)
+rows <- sample(1:n,.7*n)
+trainX <-pca_scores[rows,]
+testX <-pca_scores[-rows,]
+trainY <- class_cols[rows,]
+testY <- class_cols[-rows,]
+
+# make sure the levels are set for the train and test of joint. 
+levels(testY$joint_idx) <- levels(class_cols$joint_idx)
+levels(trainY$joint_idx) <- levels(class_cols$joint_idx)
+```
+
+
+```{r,fig.height=12,fig.width=12}
+my.cols=c("red", "blue")
+pairs(trainX, pch=5, cex=.7,col=my.cols[(trainY$Group=="CUR")+1])
+
+```
+
+\newpage
+
+##  Model building:
+
+To build the a model for classificaiton of the handwriting, Linear Discriminant Analysis and K-nearst means models were used.
+Among all the classifying models, like logistic regression , quadratic regression , LDA and Knn were used for the following reasons.Logistic regression is handy only for binary classification. thats only when the the response variable is has two classes. since this classifcation has resposnse that has more than 2 classes, it is removed from the selection. QDa is good when we have enough observations that outnumber the parameters it uses. for LDA the number of paramenters is always $q-1$, where $q$ is the number of predictors. but for QDA, the number of parameters $k(q)(q+1)/2$ and $k$ is the number of classes. The number $k(q)(q+1)/2$ came from the fact that   varianc-covariance marix of of each class of the predictors are not equal. For LDA we take only the diagonal values in the matrix. but for QDA we have to take all the upper and lower triangle values and each multipied by the classes becacuse QDA takes separate matrix for each class. in our case q=23, and k=(2,6,40,480).
+
+For group = 2x23x24/2 = 552 parameters and 1440/2=720 observations
+
+For Condition = 6x23x24/2=1656 parameters , 1440/6 = 240 observations
+
+And for subject and JOint, parameter increase and obsevation decrease
+
+Omitting Logistic regression and QDA from the choice, for the above reason, I will use LDA and QDA
+
+## Linear Discrimininant Analysis (LDA)
+
+LDA algorithm is based on Bayes theorem and classification of an observation is done in following two steps.
+
+-Identify the distribution of each of each class in in the input variable.
+
+-Flip the distribution using Bayes theorem.
+
+In LDA algorithm, the distribution is assumed to be Gaussian and exact distribution is plotted by calculating the mean and variance from the historical data.
+
+ datascienceplus.com/how-to-perform-logistic-regression-lda-qda-in-r/
+
+
+
+-Three dataset will be used.
+
+-Full data for prdiction
+
+-Train data for Accuracy test
+
+-Test data for Accuracy test
+
+```{r}
+
+
+# Accuracy Go
+lda_acc_grp <- lda(x=trainX,trainY$Group)
+pred_grp <- predict(lda_acc_grp,newdata = testX)
+errg <- mean(pred_grp$class!=testY$Group)
+cat("Group Error=",round(errg,4)*100,"%")
+
+
+# Accuracy
+lda_acc_con<- lda(x=trainX,trainY$Condition)
+pred_con <- predict(lda_acc_con,newdata = testX)
+errc <- mean(pred_con$class!=testY$Condition)
+cat("Condition Error=",round(errc,4)*100,"%")
+
+#lda_subj <- lda(x=pca_scores,grouping = class_cols$Subject,CV=T)
+
+#Accuracy
+lda_acc_subj<- lda(x=trainX,trainY$Subject)
+pred_subj<- predict(lda_acc_subj,newdata = testX)
+errs <- mean(pred_subj$class!=testY$Subject)
+cat("Subject Error=",round(errs,4)*100,"%")
+```
+
+For joint Accuracy,the number of observation are not flexible. If sample random for  train and test, the chance to enclude all the levels in a dataset is rare. Instead, Trial 1, and 2 were selected for train, and the third trial for test.
+
+```{r}
+
+
+# split train and test data basedn the values of trial column
+dt <- cbind(class_cols,pca_scores)
+trnX <-dt[dt$Trial %in%  c(1,2),6:10]
+tstx <-dt[!dt$Trial %in%  c(1,2),6:10]
+trnY <- dt[dt$Trial %in%  c(1,2),]
+tstY <- dt[!dt$Trial %in%  c(1,2),]
+
+lda_acc_join <-lda(x=trnX,trnY$joint_idx)
+    prd_joint <- predict(lda_acc_join,newdata = tstx)
+      errj <- mean(prd_joint$class != tstY$joint_idx)
+cat("Joint Error=",round(errj,4)*100,"%")
+```
+
+
+## Prediction of unlabeled data.
+
+To predict the data, we have to transform our unlabeled data to the same structure as the labeled data. that is, same number of predictors, the same dimention reduction and use the the model for predction.
+
+```{r}
+unlabeled <-read.csv("unlab.example.trial.csv",stringsAsFactors = F)[, -1]
+
+unlabeled <- unlabeled[ , -which(names(unlabeled) %in% c("RelativeDurationofPrimary","RelativeSizeofPrimary  "))]
+
+tst_dat_means <- unlabeled %>% group_by(Trial) %>% summarise_all(funs(mean))
+tst_dat_means <- tst_dat_means[,-1]
+pca_pred <-predict(pca_mod,newdata =tst_dat_means )[,1:10]
+
+# Joint
+lda_joint_nocv <-lda(x=pca_scores,grouping = class_cols$joint_idx)
+Joint <-predict(lda_joint_nocv,newdata=pca_pred)$class
+# Group
+lda_grp_nocv <- lda(x=pca_scores,grouping = class_cols$Group)
+Group <- predict(lda_grp_nocv,newdata = pca_pred)$class
+#Condition
+lda_cond_nocv <-lda(x=pca_scores,grouping = class_cols$Condition)
+Condition <- predict(lda_cond_nocv,newdata = pca_pred)$class
+# Subject
+lda_subj_nocv <- lda(x=pca_scores,grouping = class_cols$Subject)
+Subject <- predict(lda_subj_nocv,newdata =pca_pred)$class
+# Display in one
+pred_OUt <-as.data.frame(cbind(Joint=paste(Joint),Group=paste(Group),Subject=paste(Subject),Condition=paste(Condition)))
+kable(pred_OUt)
+```
+
+## K nearest neighbours. Knn
+
+Unlike LDA which assumes that the classes are on gausian distribution, Knn is a non-parametric method which uses an algorithm of classifying an observation to the majority in its neighbours. the number of neighbors are represented by k. the choice of k is where it gives the minimum error. I will iterate 100 odd numbers of neighbours to find the miminmum error. Odd was choosen to break ties in case it happens.
+
+```{r}
+
+# Merge the Predictor dataset and Response dataset 
+merged_for_knn <- data.frame(cbind(class_cols,pca_scores))
+# use index sample to subset from above process.
+train_scores <- merged_for_knn[rows,]
+test_scores <- merged_for_knn[-rows,]
+
+# vector of 20 odd numbers
+odd100 <-seq(1,by=2, len=20)
+results <- data.frame(k=odd100, err_grp=NA,err_con=NA, err_subj=NA,err_joint =NA)
+
+grp <- factor(train_scores$Group)
+cond <- factor(train_scores$Condition)
+subj <- factor(train_scores$Subject)
+joint <- factor(train_scores$joint_idx)
+
+j<-0
+for(i in odd100){
+  j <- j+1
+    # Group
+  knn_grp <- knn(train = train_scores[,5:14],test = test_scores[,5:14],cl=grp,k=i)
+  errgg <-mean(knn_grp!=test_scores$Group)
+  results$err_grp[j] <- errgg
+ 
+  knn_cond <- knn(train = train_scores[,5:14],test = test_scores[,5:14],cl=cond,k=i)
+  errcc <-mean(knn_cond!=test_scores$Condition)
+  results$err_con[j] <- errcc
+  
+  knn_subj <- knn(train = train_scores[,5:14],test = test_scores[,5:14],cl=subj,k=i)
+  errss <-mean(knn_subj!=test_scores$Subject)
+  results$err_subj[j] <- errss
+  # # joint
+   # 
+   knn_joint <- knn(train = train_scores[,5:14],test = test_scores[,5:14],cl=joint,k=i)
+   levels(knn_joint)<- levels(test_scores$joint_idx)
+    errjj <-mean(knn_joint!=test_scores$joint_idx)
+    results$err_joint[j] <- errjj
+}
+
+
+
+
+
+```
+
+
+
+## Selection of K
+
+```{r}
+par(mfrow=c(2,2),mar=c(3,3,3,1))
+plot(x=results$k, y=results$err_grp, type="l", xlab="K", ylab="Error",main = "Group")
+plot(x=results$k, y=results$err_con, type="l", xlab="K", ylab="Error",main = "Condition")
+plot(x=results$k, y=results$err_subj, type="l", xlab="K", ylab="Error",main = "Subject")
+plot(x=results$k, y=results$err_joint, type="l", xlab="K", ylab="Error",main = "Joint")
+#
+```
+
+For Joint due to lack of obsevations, we have only three observations, we will use k=1 and we wll use the trial 1 and 2 as training and trial as 3.
+
+```{r}
+
+# select k where error is minimum
+
+kg_min<- which.min(results$err_grp)
+kg <-results[kg_min,]
+
+kc_min <- which.min(results$err_con)
+kc <-results[kc_min,]
+
+ks_min <- which.min(results$err_subj)
+ks <-results[ks_min,]
+
+kj_min <- which.min(results$err_joint)
+kj <-results[kj_min,]
+
+
+kable(cbind(Class=c("Group","Condition","Subject","Joint"),rbind(kg,kc,ks,kj)),row.names = F,caption = "Errors for different K")
+
+```
+
+```{r}
+# # use traial 1 and 2 as training and trial 3 as test as for LDA
+cl_joint <- factor(trnY$joint_id)
+knn_joint <- knn(train = trnX,test = tstx,cl=cl_joint,k=1)
+errknn <-mean(knn_joint!= tstY$joint_idx)
+cat("Condition Error=",round(errknn,4)*100,"%")
+
+```
+
+
+## Prediction
+
+The following prediction was made from the model.
+
+```{r}
+cl_grp <- factor(class_cols$Group)
+cl_con <- factor(class_cols$Condition)
+cl_subj <- factor(class_cols$Subject)
+cl_p_join <- factor(class_cols$joint_idx)
+
+knn_grp <- knn(train = pca_scores,test = pca_pred,cl=cl_grp,k=kg)
+knn_con <- knn(train = pca_scores,test = pca_pred,cl=cl_con,k=kc)
+knn_subj <- knn(train = pca_scores,test = pca_pred,cl=cl_subj,k=ks)
+
+
+knn_joint <- knn(train = pca_scores,test =pca_pred ,cl=cl_p_join,k=1)
+
+pred_OUt <-as.data.frame(cbind(Joint=paste(knn_joint),Group=paste(knn_grp),Subject=paste(knn_subj),Condition=paste(knn_con)))
+kable(pred_OUt)
+
+```
+
