@@ -3,7 +3,7 @@ title: 'STAT602 Final Project '
 author: "Negassi Tesfay"
 date: "4/25/2020"
 output:
-  rmarkdown::github_document
+  pdf_document: default
   word_document: default
 ---
 
@@ -24,7 +24,6 @@ library(gridExtra)
 
 
 ```{r}
-setwd("C:\\Users\\negas\\OneDrive\\Desktop\\stat602_final")
 trn.dat<-read.csv("labeled.csv", stringsAsFactors =T)[, -1]
 
 ```
@@ -49,7 +48,7 @@ The goal of this project to predict the following thee charactersics based the k
 
 -This process was repeated 3 times.
 
-A total of 40 x 6 x 2 x 3 = 1440 lines were collected.
+A total of 40 x 6 x 2 x 3 = 140 lines were collected.
 
 
 ## Data Processing:
